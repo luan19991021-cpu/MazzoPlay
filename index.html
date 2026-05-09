@@ -242,6 +242,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;op
   <div class="nav-grp">
     <div class="nav-lbl">Biblioteca</div>
     <div class="ni" onclick="navClick(this,'admin')"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/></svg>Gerenciar</div>
+    <div class="ni" onclick="syncFromDrive()"><svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>Sincronizar Drive</div>
   </div>
   <div class="sb-foot">
     <div class="profile">
@@ -298,10 +299,12 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;op
 const TMDB_KEY  = '66e0dbc1911d7683333e3b768ffba0c9';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG  = 'https://image.tmdb.org/t/p/';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzVZHjiL5jMml0n0wmpNCQ58ZGMr7rKkFQAaj7-EpiGJKqTYFUimr4sl7PvmfYTZy3xGg/exec';
 
-const LIB_KEY  = 'mp_library';
-const PROG_KEY = 'mp_progress';
-const FAV_KEY  = 'mp_favs';
+const LIB_KEY   = 'mp_library';
+const PROG_KEY  = 'mp_progress';
+const FAV_KEY   = 'mp_favs';
+const CACHE_KEY = 'mp_cache_time';
 
 // ═══════════════════════════════════
 // STATE
@@ -314,18 +317,88 @@ let isPlaying   = false;
 let heroPool    = [];
 let heroIdx     = 0;
 let heroTimer;
-let fetchedMeta = null; // preview from TMDB before saving
+let fetchedMeta = null;
 
 function loadJ(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch(e){return d;}}
 function saveJ(k,v){localStorage.setItem(k,JSON.stringify(v));}
 
 // ═══════════════════════════════════
-// BOOT
+// BOOT — Sincroniza com Drive
 // ═══════════════════════════════════
-window.addEventListener('DOMContentLoaded',()=>{
+window.addEventListener('DOMContentLoaded', async ()=>{
   updateBadges();
+  // Mostra o que tiver em cache imediatamente
   renderHome();
+  // Busca atualizações do Drive em background
+  await syncFromDrive();
 });
+
+async function syncFromDrive(){
+  try {
+    showToast('🔄 Sincronizando com o Drive…', 5000);
+    const resp = await fetch(APPS_SCRIPT_URL);
+    const raw  = await resp.json();
+    if (!Array.isArray(raw) || raw.length === 0) {
+      showToast('📂 Nenhum arquivo encontrado no Drive. Verifique as pastas.');
+      return;
+    }
+
+    // Enriquecer com TMDB (agrupa por título para não repetir chamadas)
+    const seen = {};
+    const enriched = [];
+    for (const item of raw) {
+      const key = item.title + '_' + item.type;
+      if (seen[key]) {
+        // Série já buscada — reusa metadados
+        enriched.push({ ...seen[key], ...item, id: item.fileId });
+      } else {
+        const meta = await fetchTMDB(item.title, item.type);
+        const full = { ...item, ...meta, id: item.fileId, megaLink: item.driveLink };
+        seen[key] = full;
+        enriched.push(full);
+      }
+      await sleep(200);
+    }
+
+    library = enriched;
+    saveJ(LIB_KEY, library);
+    saveJ(CACHE_KEY, Date.now());
+    updateBadges();
+    renderHome();
+    showToast(`✅ ${library.length} títulos sincronizados!`);
+  } catch(e) {
+    console.error(e);
+    showToast('⚠️ Erro ao sincronizar. Usando dados em cache.');
+  }
+}
+
+async function fetchTMDB(title, type){
+  try {
+    const mediaType = type === 'series' ? 'tv' : 'movie';
+    const q = encodeURIComponent(title);
+    const res  = await fetch(`${TMDB_BASE}/search/${mediaType}?api_key=${TMDB_KEY}&query=${q}&language=pt-BR`);
+    const data = await res.json();
+    const r    = data.results?.[0];
+    if (!r) return {};
+    const det  = await fetch(`${TMDB_BASE}/${mediaType}/${r.id}?api_key=${TMDB_KEY}&language=pt-BR`);
+    const d    = await det.json();
+    return {
+      tmdbId:   r.id,
+      title:    r.title || r.name || title,
+      year:     parseInt((r.release_date||r.first_air_date||'').slice(0,4))||null,
+      desc:     r.overview||'',
+      rating:   r.vote_average?.toFixed(1)||'—',
+      genre:    (d.genres?.[0]?.name||'').toLowerCase(),
+      duration: type==='movie'
+        ? (d.runtime ? Math.floor(d.runtime/60)+'h '+(d.runtime%60)+'min' : '—')
+        : (d.number_of_seasons ? d.number_of_seasons+(d.number_of_seasons===1?' temp':' temps') : '—'),
+      poster:   r.poster_path   ? `${TMDB_IMG}w342${r.poster_path}`   : null,
+      backdrop: r.backdrop_path ? `${TMDB_IMG}w1280${r.backdrop_path}` : null,
+    };
+  } catch(e){ return {}; }
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 // ═══════════════════════════════════
 // HOME
