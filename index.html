@@ -273,23 +273,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;op
 <!-- PLAYER MODAL -->
 <div class="backdrop" id="bd" onclick="bgClose(event)">
   <div class="pshell">
-    <div class="pvideo">
-      <img class="pvbg" id="pbg" src="" alt="">
-      <div class="pclose" onclick="closeP()"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
-      <div class="pcenter" onclick="toggleP()"><svg id="pci" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
-      <div class="pctrl">
-        <div class="pseek" onclick="seekP(event)"><div class="pseek-fill" id="psf"></div></div>
-        <div class="pbar">
-          <button class="pbtn" onclick="toggleP()"><svg id="ppi" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
-          <button class="pbtn"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
-          <span class="ptime" id="pt">—</span>
-          <div class="pright">
-            <button class="pbtn"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg></button>
-            <button class="pbtn"><svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg></button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <div class="pvideo" id="pvideoArea"></div>
     <div class="pmeta">
       <div class="ptext">
         <div class="ptitle" id="ptitle"></div>
@@ -298,7 +282,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;op
       </div>
       <div class="pactions">
         <button class="pabtn" id="favBtn" onclick="toggleFav()"><svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3z"/></svg>Favoritar</button>
-        <button class="pabtn" onclick="openMega()"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>Abrir no Mega</button>
+        <button class="pabtn" onclick="openExternal()"><svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>Abrir no Drive</button>
         <button class="pabtn" onclick="resetProgress()"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>Reiniciar</button>
       </div>
     </div>
@@ -514,9 +498,9 @@ function renderAdmin(){
 
         <div class="form-row single">
           <div class="form-group">
-            <div class="form-label">Link do arquivo no Mega</div>
-            <input class="form-input" id="f_link" placeholder="https://mega.nz/file/...">
-            <div class="form-hint">Clique com botão direito no arquivo no Mega → Obter link → copie o link completo</div>
+            <div class="form-label">Link do arquivo no Google Drive</div>
+            <input class="form-input" id="f_link" placeholder="https://drive.google.com/file/d/...">
+            <div class="form-hint">Clique com botão direito no arquivo no Drive → Compartilhar → Qualquer pessoa com o link → Copiar link</div>
           </div>
         </div>
 
@@ -660,44 +644,65 @@ function deleteItem(id){
 // ═══════════════════════════════════
 // PLAYER
 // ═══════════════════════════════════
+// Extrai ID do Google Drive de qualquer formato de link
+function driveId(url){
+  if(!url) return null;
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+  return m ? m[1] : null;
+}
+
 function openP(id){
   const item = library.find(i=>i.id===id);
   if(!item) return;
   currentItem = item;
-  document.getElementById('pbg').src = item.backdrop||item.poster||'';
+
+  const area = document.getElementById('pvideoArea');
+  const fileId = driveId(item.megaLink);
+
+  if(fileId){
+    // Player real via iframe do Google Drive
+    area.innerHTML = `
+      <div class="pclose" onclick="closeP()" style="position:absolute;top:13px;right:13px;z-index:5;width:28px;height:28px;background:rgba(28,28,28,.85);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid rgba(255,255,255,.13);">
+        <svg viewBox="0 0 24 24" style="width:11px;height:11px;fill:rgba(255,255,255,.55)"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </div>
+      <iframe
+        src="https://drive.google.com/file/d/${fileId}/preview"
+        style="width:100%;height:100%;border:none;display:block;"
+        allow="autoplay; fullscreen"
+        allowfullscreen>
+      </iframe>`;
+  } else {
+    // Sem link — mostra poster com botão para abrir externamente
+    area.innerHTML = `
+      <div class="pclose" onclick="closeP()" style="position:absolute;top:13px;right:13px;z-index:5;width:28px;height:28px;background:rgba(28,28,28,.85);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid rgba(255,255,255,.13);">
+        <svg viewBox="0 0 24 24" style="width:11px;height:11px;fill:rgba(255,255,255,.55)"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </div>
+      <img src="${item.backdrop||item.poster||''}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:brightness(.25)">
+      <div style="position:relative;z-index:2;text-align:center;color:rgba(255,255,255,.5);">
+        <svg viewBox="0 0 24 24" style="width:40px;height:40px;fill:currentColor;margin-bottom:12px"><path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2z"/></svg>
+        <div style="font-size:14px">Nenhum link de vídeo cadastrado</div>
+      </div>`;
+  }
+
   document.getElementById('ptitle').textContent = item.title;
   document.getElementById('psubel').textContent = [item.year, item.genre, item.duration, item.rating?'★ '+item.rating:''].filter(Boolean).join(' · ');
   document.getElementById('pdesc').textContent  = item.desc||'';
-  const pct = progress[id]||0;
-  document.getElementById('psf').style.width = pct+'%';
-  document.getElementById('pt').textContent = pct>0 ? pct+'% assistido' : '—';
+
   const fb = document.getElementById('favBtn');
   fb.classList.toggle('on', favs.includes(id));
   fb.innerHTML = `<svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3z"/></svg>${favs.includes(id)?'Favoritado':'Favoritar'}`;
-  isPlaying = false; setPIcons(false);
+
   document.getElementById('bd').classList.add('open');
 }
 
-function closeP(){ document.getElementById('bd').classList.remove('open'); currentItem=null; }
+function closeP(){
+  // Limpa iframe para parar o vídeo
+  document.getElementById('pvideoArea').innerHTML = '';
+  document.getElementById('bd').classList.remove('open');
+  currentItem = null;
+}
 function bgClose(e){ if(e.target===document.getElementById('bd')) closeP(); }
-function toggleP(){ isPlaying=!isPlaying; setPIcons(isPlaying); }
-function setPIcons(p){
-  const pause='<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
-  const play='<path d="M8 5v14l11-7z"/>';
-  document.getElementById('ppi').innerHTML=p?pause:play;
-  document.getElementById('pci').innerHTML=p?pause:play;
-}
-function seekP(e){
-  const bar=document.getElementById('psf').parentElement;
-  const r=bar.getBoundingClientRect();
-  const pct=Math.max(0,Math.min(100,(e.clientX-r.left)/r.width*100));
-  document.getElementById('psf').style.width=pct+'%';
-  if(currentItem){
-    progress[currentItem.id]=Math.round(pct);
-    saveJ(PROG_KEY,progress);
-    document.getElementById('pt').textContent=Math.round(pct)+'% assistido';
-  }
-}
+
 function toggleFav(){
   if(!currentItem) return;
   const id=currentItem.id;
@@ -708,11 +713,19 @@ function toggleFav(){
   fb.classList.toggle('on',favs.includes(id));
   fb.innerHTML=`<svg viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3z"/></svg>${favs.includes(id)?'Favoritado':'Favoritar'}`;
 }
-function openMega(){
+
+function openExternal(){
   if(!currentItem) return;
-  const url=currentItem.megaLink;
-  if(!url||url==='#'){ showToast('⚠️ Nenhum link do Mega cadastrado'); return; }
+  const url = currentItem.megaLink;
+  if(!url||url==='#'){ showToast('⚠️ Nenhum link cadastrado'); return; }
   window.open(url,'_blank');
+}
+
+function resetProgress(){
+  if(!currentItem) return;
+  delete progress[currentItem.id];
+  saveJ(PROG_KEY,progress);
+  showToast('Progresso reiniciado');
 }
 function resetProgress(){
   if(!currentItem) return;
